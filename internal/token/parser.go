@@ -91,8 +91,20 @@ func (pt *ParsedTokens) HasToken(key string) bool {
 	return exists
 }
 
-// GetBoolToken checks if a boolean token exists (e.g., "dry", "agent")
+// GetBoolToken checks if a boolean token exists and is true
+// Returns true only if token exists and value is "true", "yes", "1", or empty (for flags like "dry")
+// Returns false if token doesn't exist
 func (pt *ParsedTokens) GetBoolToken(key string) bool {
-	value := pt.GetString(key)
-	return value == "true" || value == "yes" || value == "1" || value == ""
+	value, exists := pt.GetStringWithExists(key)
+	if !exists {
+		return false
+	}
+	// Token exists - return true if value is empty (flag), "true", "yes", or "1"
+	return value == "" || value == "true" || value == "yes" || value == "1"
+}
+
+// GetStringWithExists returns the token value and whether it exists
+func (pt *ParsedTokens) GetStringWithExists(key string) (string, bool) {
+	value, exists := pt.Tokens[strings.ToLower(key)]
+	return value, exists
 }
