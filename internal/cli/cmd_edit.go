@@ -25,6 +25,11 @@ Examples:
 	},
 }
 
+// HandleEdit handles the edit command (exported for use from UI)
+func HandleEdit(filebase string) error {
+	return handleEdit(filebase)
+}
+
 // handleEdit handles the edit command
 func handleEdit(filebase string) error {
 	editor := os.Getenv("EDITOR")

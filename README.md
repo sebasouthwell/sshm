@@ -18,6 +18,10 @@ git clone https://github.com/Sebasouthwell/sshm.git
 cd sshm
 go build -o sshm cmd/sshm/main.go
 sudo mv sshm /usr/local/bin/
+
+# Optional: Add short alias
+alias sm=sshm
+# Add to your ~/.bashrc or ~/.zshrc to make it permanent
 ```
 
 ## Quick Start
@@ -44,15 +48,21 @@ sshm add kube-pod kube default/myapp-pod-abc123
 ### 2. Connect
 
 ```bash
-# Quick connect
+# Quick connect (multiple ways)
 sshm ssh.prod-web
 sshm docker.myapp
+sshm prod-web              # Direct alias access
 
 # Or use open command
 sshm open prod-web
 
-# Interactive selection
-sshm ui
+# Interactive selection (default action)
+sshm                       # Launches UI
+sshm ui                    # Explicit UI command
+
+# With short alias (if configured)
+sm prod-web                # Same as sshm prod-web
+sm                         # Same as sshm (launches UI)
 ```
 
 ### 3. List entries
@@ -71,16 +81,40 @@ sshm ls --json
 
 ## Commands
 
+### Core Commands
+- `sshm` or `sshm ui` - Interactive TUI selection (default action)
+- `sshm <alias>` - Direct alias access (opens connection)
+- `sshm <provider>.<alias>` - Quick connect with provider
 - `sshm open <alias>` - Open a session
-- `sshm <provider>.<alias>` - Quick connect
-- `sshm ui` - Interactive TUI selection
 - `sshm ls` - List entries
 - `sshm show <alias>` - Show entry details
 - `sshm add` - Add entry
 - `sshm rm <alias>` - Remove entry
 - `sshm edit` - Edit inventory files
 - `sshm cd <alias>` - Change to entry's workdir
+- `sshm test <alias>` - Test connection
 - `sshm history` - Show command history
+
+### File Transfer
+- `sshm scp <alias> <src> <dst>` - Copy files via SCP (SSH/TF only)
+
+### Inventory Management
+- `sshm export [file]` - Export inventory to archive
+- `sshm import <file>` - Import inventory from archive
+
+### Terraform Integration
+- `sshm tf` - Interactive terraform add wizard
+- `sshm tf list [--details] [--fzf]` - List terraform resources
+- `sshm tf add [args...]` - Add terraform entry
+
+### Provider Convenience
+- `sshm ssh <alias>` - Force SSH provider
+- `sshm tf <alias>` - Force Terraform provider
+- `sshm ssm <alias>` - Force SSM provider
+- `sshm docker <alias>` - Force Docker provider
+- `sshm kube <alias>` - Force Kubernetes provider
+
+### Utilities
 - `sshm cache clear` - Clear caches
 - `sshm cache stats` - Show cache statistics
 

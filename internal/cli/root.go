@@ -38,6 +38,19 @@ func Execute() error {
 	// Initialize inventory manager
 	initManager()
 
+	// Handle no arguments - launch UI (default action)
+	if len(os.Args) == 1 {
+		return handleUI("")
+	}
+
+	// Check for help/version flags first
+	if len(os.Args) == 2 {
+		arg := os.Args[1]
+		if arg == "--help" || arg == "-h" || arg == "--version" || arg == "-v" {
+			return rootCmd.Execute()
+		}
+	}
+
 	// Check for quick connect pattern: <provider>.<alias>
 	if len(os.Args) > 1 {
 		firstArg := os.Args[1]
@@ -45,9 +58,46 @@ func Execute() error {
 			// Quick connect pattern detected
 			return handleQuickConnect(firstArg, os.Args[2:])
 		}
+
+		// Check if first arg is a known alias (direct alias access)
+		// Skip if it's a flag or known subcommand
+		if !strings.HasPrefix(firstArg, "-") && !isSubcommand(firstArg) {
+			if _, err := manager.Find(firstArg); err == nil {
+				// Found alias, route to open
+				return handleOpen(firstArg, os.Args[2:])
+			}
+		}
 	}
 
 	return rootCmd.Execute()
+}
+
+// isSubcommand checks if the argument is a known subcommand
+func isSubcommand(arg string) bool {
+	subcommands := map[string]bool{
+		"open":     true,
+		"ui":       true,
+		"ls":       true,
+		"show":     true,
+		"add":      true,
+		"rm":       true,
+		"edit":     true,
+		"cd":       true,
+		"history":  true,
+		"cache":    true,
+		"test":     true,
+		"scp":      true,
+		"export":   true,
+		"import":   true,
+		"tf":       true,
+		"ssh":      true,
+		"ssm":      true,
+		"docker":   true,
+		"kube":     true,
+		"completion": true,
+		"version":  true,
+	}
+	return subcommands[arg]
 }
 
 // initManager initializes the inventory manager with config/environment
@@ -131,4 +181,14 @@ func init() {
 	rootCmd.AddCommand(cdCmd)
 	rootCmd.AddCommand(historyCmd)
 	rootCmd.AddCommand(cacheCmd)
+	rootCmd.AddCommand(testCmd) // Defined in cmd_testcmd.go
+	rootCmd.AddCommand(scpCmd)
+	rootCmd.AddCommand(exportCmd)
+	rootCmd.AddCommand(importCmd)
+	rootCmd.AddCommand(sshCmd)
+	rootCmd.AddCommand(tfWizardCmd) // Terraform wizard command (handles both wizard and provider convenience)
+	rootCmd.AddCommand(ssmCmd)
+	rootCmd.AddCommand(dockerCmd)
+	rootCmd.AddCommand(kubeCmd)
+	// Note: tfCmd from cmd_providers.go is not added to avoid conflict with tfWizardCmd
 }

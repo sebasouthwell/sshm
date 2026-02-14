@@ -32,6 +32,11 @@ func init() {
 	showCmd.Flags().BoolVar(&showJSON, "json", false, "Output in JSON format")
 }
 
+// HandleShow handles the show command (exported for use from UI)
+func HandleShow(alias string) error {
+	return handleShow(alias, false)
+}
+
 // handleShow handles the show command
 func handleShow(alias string, jsonOutput bool) error {
 	entry, err := manager.Find(alias)

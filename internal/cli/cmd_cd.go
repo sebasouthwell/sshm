@@ -22,6 +22,11 @@ Example:
 	},
 }
 
+// HandleCD handles the cd command (exported for use from UI)
+func HandleCD(alias string) error {
+	return handleCd(alias)
+}
+
 // handleCd handles the cd command
 func handleCd(alias string) error {
 	entry, err := manager.Find(alias)
