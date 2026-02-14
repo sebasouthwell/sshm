@@ -19,10 +19,18 @@ cd sshm
 go build -o sshm cmd/sshm/main.go
 sudo mv sshm /usr/local/bin/
 
-# Optional: Add short alias
+# Optional: Add short alias and shell wrapper functions
+# Add to your ~/.bashrc or ~/.zshrc:
 alias sm=sshm
-# Add to your ~/.bashrc or ~/.zshrc to make it permanent
+
+# Shell wrapper for cd command (enables direct directory changes)
+sshm-cd() {
+    local dir
+    dir=$(sshm cd "$@" 2>/dev/null) && cd "$dir"
+}
 ```
+
+**Note**: The `cd` command prints the directory path for shell evaluation. Use `eval "$(sshm cd alias)"` or the `sshm-cd` wrapper function above to actually change directories.
 
 ## Quick Start
 
@@ -91,7 +99,7 @@ sshm ls --json
 - `sshm add` - Add entry
 - `sshm rm <alias>` - Remove entry
 - `sshm edit` - Edit inventory files
-- `sshm cd <alias>` - Change to entry's workdir
+- `sshm cd <alias>` - Print entry's workdir (use `eval "$(sshm cd alias)"` or `sshm-cd alias` wrapper function to change directory)
 - `sshm test <alias>` - Test connection
 - `sshm history` - Show command history
 

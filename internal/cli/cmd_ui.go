@@ -282,14 +282,8 @@ func handleUIFZF(filter string) error {
 	switch keypress {
 	case "ctrl-d":
 		// Change to workdir or key directory
-		// Print directory path - user can eval "$(sshm cd alias)" or manually cd
-		dir, err := handleCDForUI(entry)
-		if err != nil {
-			return err
-		}
-		fmt.Printf("Directory: %s\n", dir)
-		fmt.Printf("Run: cd %s\n", dir)
-		return nil
+		// Print directory path (can be used with eval "$(sshm cd alias)")
+		return HandleCD(alias)
 	case "ctrl-h":
 		// Copy host/IP to clipboard
 		return handleUICopyHost(entry)
