@@ -3,6 +3,7 @@ package cli
 import (
 	"bufio"
 	"fmt"
+	"io/ioutil"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -118,6 +119,12 @@ func handleUIFZF(filter string) error {
 		return fmt.Errorf("failed to create fzf stdin pipe: %w", err)
 	}
 
+	// Create entry map for preview lookup
+	entryMap := make(map[string]*inventory.Entry)
+	for _, entry := range entries {
+		entryMap[entry.Alias] = entry
+	}
+
 	// Format entries for fzf with enhanced display
 	go func() {
 		defer fzfIn.Close()
@@ -143,8 +150,14 @@ func handleUIFZF(filter string) error {
 			}
 
 			// Determine icon and color based on type/target
-			if strings.HasPrefix(entry.Target, "tf:") {
+			if entry.Type == "tf" || strings.HasPrefix(entry.Target, "tf:") {
 				icon = "\033[35m⛏\033[0m" // Magenta for TF
+			} else if entry.Type == "ssm" {
+				icon = "\033[33m☁\033[0m" // Yellow for SSM
+			} else if entry.Type == "docker" {
+				icon = "\033[34m🐳\033[0m" // Blue for Docker
+			} else if entry.Type == "kube" {
+				icon = "\033[36m☸\033[0m" // Cyan for Kube
 			} else if matched, _ := regexp.MatchString(`^\d+\.\d+\.\d+\.\d+$`, entry.Target); matched {
 				icon = "\033[36m●\033[0m" // Cyan for IP
 			} else {
@@ -204,10 +217,10 @@ func handleUIFZF(filter string) error {
 				targetDisplay = targetDisplay[:43] + "..."
 			}
 
-			// Format: icon alias<TAB>target<TAB>user<TAB>port<TAB>key<TAB>workdir<TAB>tags<TAB>filebase
-			// Use separator that won't conflict with display
+			// Format: alias<TAB>icon<TAB>alias<TAB>target<TAB>user<TAB>port<TAB>key<TAB>workdir<TAB>tags<TAB>filebase
+			// First field is alias for preview extraction
 			line := fmt.Sprintf("%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s",
-				entry.Alias, // For extraction
+				entry.Alias, // For extraction (field 1)
 				icon,
 				entry.Alias,
 				targetDisplay,
