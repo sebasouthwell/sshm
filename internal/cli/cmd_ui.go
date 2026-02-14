@@ -99,6 +99,10 @@ func handleUIFZF(filter string) error {
 
 	// Build fzf command with bindings
 	header := "Enter=ssh | Ctrl-d=cd | Ctrl-h=host | Ctrl-k=key | Ctrl-u=user@host | Ctrl-p=cmd | Ctrl-s=show | Ctrl-e=edit | Ctrl-t=test | Ctrl-w=workdir | ?=help"
+	
+	// Create a temporary script for preview that extracts alias and shows details
+	previewScript := createPreviewScript()
+	
 	fzfArgs := []string{
 		"--height=85%",
 		"--border",
@@ -107,8 +111,8 @@ func handleUIFZF(filter string) error {
 		"--prompt=sm> ",
 		"--header=" + header,
 		"--expect=enter,ctrl-d,ctrl-h,ctrl-k,ctrl-u,ctrl-p,ctrl-s,ctrl-e,ctrl-t,ctrl-w",
-		"--preview-window=right:40%:wrap",
-		"--preview=echo 'Use Ctrl-s to show full details'",
+		"--preview-window=right:40%:wrap:border-left",
+		"--preview=" + previewScript + " {1}",
 		"--bind=?:toggle-preview",
 	}
 
@@ -117,12 +121,6 @@ func handleUIFZF(filter string) error {
 	fzfIn, err := fzfCmd.StdinPipe()
 	if err != nil {
 		return fmt.Errorf("failed to create fzf stdin pipe: %w", err)
-	}
-
-	// Create entry map for preview lookup
-	entryMap := make(map[string]*inventory.Entry)
-	for _, entry := range entries {
-		entryMap[entry.Alias] = entry
 	}
 
 	// Format entries for fzf with enhanced display
@@ -237,6 +235,12 @@ func handleUIFZF(filter string) error {
 
 	// Run fzf and capture output
 	output, err := fzfCmd.Output()
+	
+	// Clean up preview script
+	if previewScript != "" {
+		os.Remove(previewScript)
+	}
+	
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			if exitErr.ExitCode() == 130 {
@@ -278,7 +282,14 @@ func handleUIFZF(filter string) error {
 	switch keypress {
 	case "ctrl-d":
 		// Change to workdir or key directory
-		return HandleCD(alias)
+		// Print directory path - user can eval "$(sshm cd alias)" or manually cd
+		dir, err := handleCDForUI(entry)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("Directory: %s\n", dir)
+		fmt.Printf("Run: cd %s\n", dir)
+		return nil
 	case "ctrl-h":
 		// Copy host/IP to clipboard
 		return handleUICopyHost(entry)
@@ -383,20 +394,67 @@ func handleUISimple(filter string) error {
 
 // handleUICopyHost copies host/IP to clipboard
 func handleUICopyHost(entry *inventory.Entry) error {
-	// For TF entries, try to resolve IP
-	target := entry.Target
-	if strings.HasPrefix(target, "tf:") {
-		// Try to resolve, but don't fail if we can't
+	var target string
+	
+	switch entry.Type {
+	case "ssh":
+		target = entry.Target
+	case "tf":
+		// Resolve terraform address to IP
 		prov, err := GetProvider("tf")
 		if err == nil {
 			opts := provider.RuntimeOpts{}
 			resolved, err := prov.Resolve(entry, opts)
 			if err == nil && resolved != nil {
-				target = resolved.Target
+				target = resolved.Target // IP address
+			} else {
+				target = entry.Target // Fallback to terraform address
+			}
+		} else {
+			target = entry.Target
+		}
+	case "ssm":
+		// Resolve to instance-id
+		prov, err := GetProvider("ssm")
+		if err == nil {
+			opts := provider.RuntimeOpts{}
+			resolved, err := prov.Resolve(entry, opts)
+			if err == nil && resolved != nil {
+				if instanceID := resolved.Additional["instance_id"]; instanceID != "" {
+					target = instanceID
+				}
 			}
 		}
+		if target == "" {
+			target = entry.Target // Fallback
+		}
+	case "docker":
+		target = entry.Target // Container name/ID
+	case "kube":
+		// Resolve to pod name
+		prov, err := GetProvider("kube")
+		if err == nil {
+			opts := provider.RuntimeOpts{}
+			resolved, err := prov.Resolve(entry, opts)
+			if err == nil && resolved != nil {
+				if pod := resolved.Additional["pod"]; pod != "" {
+					target = pod
+				} else {
+					target = resolved.Target
+				}
+			}
+		}
+		if target == "" {
+			target = entry.Target // Fallback
+		}
+	default:
+		target = entry.Target
 	}
-
+	
+	if target == "" {
+		return fmt.Errorf("no target available for entry type: %s", entry.Type)
+	}
+	
 	if err := utils.CopyToClipboard(target); err != nil {
 		fmt.Printf("Host/IP: %s (no clipboard tool found)\n", target)
 		return nil
@@ -421,24 +479,110 @@ func handleUICopyKey(entry *inventory.Entry) error {
 
 // handleUICopyUserHost copies user@host to clipboard
 func handleUICopyUserHost(entry *inventory.Entry) error {
-	// Resolve target if needed
-	target := entry.Target
-	if strings.HasPrefix(target, "tf:") {
+	var target string
+	var userHost string
+	
+	switch entry.Type {
+	case "ssh":
+		target = entry.Target
+		if entry.User != "" {
+			userHost = entry.User + "@" + target
+		} else {
+			userHost = target
+		}
+	case "tf":
+		// Resolve terraform address to IP
 		prov, err := GetProvider("tf")
 		if err == nil {
 			opts := provider.RuntimeOpts{}
 			resolved, err := prov.Resolve(entry, opts)
 			if err == nil && resolved != nil {
-				target = resolved.Target
+				target = resolved.Target // IP address
+				if resolved.User != "" {
+					userHost = resolved.User + "@" + target
+				} else if entry.User != "" {
+					userHost = entry.User + "@" + target
+				} else {
+					userHost = target
+				}
+			} else {
+				target = entry.Target // Fallback to terraform address
+				if entry.User != "" {
+					userHost = entry.User + "@" + target
+				} else {
+					userHost = target
+				}
+			}
+		} else {
+			target = entry.Target
+			if entry.User != "" {
+				userHost = entry.User + "@" + target
+			} else {
+				userHost = target
 			}
 		}
+	case "ssm":
+		// SSM doesn't use user@ format, just instance-id
+		prov, err := GetProvider("ssm")
+		if err == nil {
+			opts := provider.RuntimeOpts{}
+			resolved, err := prov.Resolve(entry, opts)
+			if err == nil && resolved != nil {
+				if instanceID := resolved.Additional["instance_id"]; instanceID != "" {
+					userHost = instanceID
+				} else {
+					userHost = entry.Target
+				}
+			} else {
+				userHost = entry.Target
+			}
+		} else {
+			userHost = entry.Target
+		}
+	case "docker":
+		// Docker: user@container if user specified, else just container
+		target = entry.Target
+		if entry.User != "" {
+			userHost = entry.User + "@" + target
+		} else {
+			userHost = target
+		}
+	case "kube":
+		// Resolve to pod name
+		prov, err := GetProvider("kube")
+		if err == nil {
+			opts := provider.RuntimeOpts{}
+			resolved, err := prov.Resolve(entry, opts)
+			if err == nil && resolved != nil {
+				if pod := resolved.Additional["pod"]; pod != "" {
+					target = pod
+				} else {
+					target = resolved.Target
+				}
+			} else {
+				target = entry.Target
+			}
+		} else {
+			target = entry.Target
+		}
+		if entry.User != "" {
+			userHost = entry.User + "@" + target
+		} else {
+			userHost = target
+		}
+	default:
+		target = entry.Target
+		if entry.User != "" {
+			userHost = entry.User + "@" + target
+		} else {
+			userHost = target
+		}
 	}
-
-	userHost := target
-	if entry.User != "" {
-		userHost = entry.User + "@" + target
+	
+	if userHost == "" {
+		return fmt.Errorf("no target available for entry type: %s", entry.Type)
 	}
-
+	
 	if err := utils.CopyToClipboard(userHost); err != nil {
 		fmt.Printf("User@Host: %s (no clipboard tool found)\n", userHost)
 		return nil
@@ -447,14 +591,9 @@ func handleUICopyUserHost(entry *inventory.Entry) error {
 	return nil
 }
 
-// handleUICopyCommand copies full SSH command to clipboard
+// handleUICopyCommand copies full command to clipboard (supports all providers)
 func handleUICopyCommand(entry *inventory.Entry) error {
-	if entry.Type != "ssh" && entry.Type != "tf" {
-		fmt.Println("Command copy only supported for SSH/TF entries")
-		return nil
-	}
-
-	// Build command using dry-run
+	// Build command using dry-run for any provider type
 	prov, err := GetProvider(entry.Type)
 	if err != nil {
 		return fmt.Errorf("failed to get provider: %w", err)
@@ -496,4 +635,74 @@ func handleUICopyWorkdir(entry *inventory.Entry) error {
 	}
 	fmt.Printf("Copied workdir: %s\n", entry.Workdir)
 	return nil
+}
+
+// handleCDForUI handles cd command for UI (returns directory path)
+func handleCDForUI(entry *inventory.Entry) (string, error) {
+	var targetDir string
+	if entry.Workdir != "" {
+		targetDir = entry.Workdir
+	} else if entry.Key != "" {
+		targetDir = filepath.Dir(entry.Key)
+	} else {
+		return "", fmt.Errorf("no workdir or key directory available for alias: %s", entry.Alias)
+	}
+
+	// Check if directory exists
+	if _, err := os.Stat(targetDir); os.IsNotExist(err) {
+		return "", fmt.Errorf("directory not found: %s", targetDir)
+	}
+
+	return targetDir, nil
+}
+
+// resolveEntryForDisplay resolves an entry for display purposes (best-effort)
+// Returns the resolved target and additional info
+func resolveEntryForDisplay(entry *inventory.Entry) (target string, additional map[string]string, err error) {
+	prov, err := GetProvider(entry.Type)
+	if err != nil {
+		return entry.Target, nil, nil // Return original target on error
+	}
+	
+	opts := provider.RuntimeOpts{}
+	resolved, err := prov.Resolve(entry, opts)
+	if err != nil {
+		return entry.Target, nil, nil // Return original target on error
+	}
+	
+	return resolved.Target, resolved.Additional, nil
+}
+
+// createPreviewScript creates a temporary shell script for fzf preview
+// The script extracts the alias from fzf selection and calls sshm show
+func createPreviewScript() string {
+	// Get the sshm binary path
+	sshmPath, err := os.Executable()
+	if err != nil {
+		// Fallback to "sshm" if we can't find executable
+		sshmPath = "sshm"
+	}
+
+	// Create temp script
+	tmpFile, err := ioutil.TempFile("", "sshm-preview-*.sh")
+	if err != nil {
+		return "echo 'Preview unavailable'"
+	}
+	defer tmpFile.Close()
+
+	// Write script that extracts alias and shows details
+	script := fmt.Sprintf(`#!/bin/bash
+alias="$1"
+if [ -z "$alias" ]; then
+	echo "No entry selected"
+	exit 0
+fi
+
+# Call sshm show with the alias (suppress errors for cleaner preview)
+%s show "$alias" 2>/dev/null || echo "Entry not found: $alias"
+`, sshmPath)
+
+	tmpFile.WriteString(script)
+	tmpFile.Chmod(0755)
+	return tmpFile.Name()
 }
