@@ -2,6 +2,9 @@ package cli
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/Sebasouthwell/sshm/internal/inventory"
@@ -102,6 +105,11 @@ func handleAddV2(alias string, args []string) error {
 		return fmt.Errorf("--target is required for v2 format")
 	}
 
+	// Warn if positional args are provided (they're ignored in v2 format)
+	if len(args) > 0 {
+		fmt.Fprintf(os.Stderr, "warning: positional arguments are ignored when using v2 format with flags. Use --key, --user, etc. instead.\n")
+	}
+
 	entry := inventory.NewEntry()
 	entry.Alias = alias
 	entry.Type = addType
@@ -111,6 +119,11 @@ func handleAddV2(alias string, args []string) error {
 	entry.Key = addKey
 	entry.Workdir = addWorkdir
 	entry.Tags = addTags
+
+	// For terraform entries, validate target format
+	if addType == "tf" && !strings.Contains(addTarget, ":") {
+		return fmt.Errorf("terraform target must include mode (e.g., aws_instance.hf:public or aws_instance.hf:private)")
+	}
 
 	// Parse meta if provided
 	if addMeta != "" {
@@ -131,7 +144,8 @@ func handleAddV2(alias string, args []string) error {
 		return err
 	}
 
-	fmt.Printf("Added entry: %s (%s) -> %s\n", alias, addType, manager.GetInvDir())
+	filePath := filepath.Join(manager.GetInvDir(), filebase+".json")
+	fmt.Printf("Added entry: %s (%s) -> %s\n", alias, addType, filePath)
 	return nil
 }
 

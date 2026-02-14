@@ -42,8 +42,15 @@ func handleEdit(filebase string) error {
 		// Open directory
 		target = manager.GetInvDir()
 	} else {
-		// Open specific file
-		target = filepath.Join(manager.GetInvDir(), filebase+".inv")
+		// Open specific file (JSON format)
+		target = filepath.Join(manager.GetInvDir(), filebase+".json")
+		// If JSON file doesn't exist, check for legacy .inv file
+		if _, err := os.Stat(target); os.IsNotExist(err) {
+			legacyPath := filepath.Join(manager.GetInvDir(), filebase+".inv")
+			if _, err := os.Stat(legacyPath); err == nil {
+				target = legacyPath
+			}
+		}
 	}
 
 	cmd := exec.Command(editor, target)

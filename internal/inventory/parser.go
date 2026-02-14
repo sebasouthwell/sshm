@@ -15,6 +15,7 @@ var (
 )
 
 // ParseFile parses an inventory file and returns entries
+// Invalid lines are skipped with warnings instead of failing the entire file
 func ParseFile(filePath string) ([]*Entry, error) {
 	file, err := os.Open(filePath)
 	if err != nil {
@@ -37,7 +38,9 @@ func ParseFile(filePath string) ([]*Entry, error) {
 
 		entry, err := ParseLine(line, filePath)
 		if err != nil {
-			return nil, fmt.Errorf("line %d in %s: %w", lineNum, filePath, err)
+			// Log warning but continue parsing (don't fail entire file)
+			fmt.Fprintf(os.Stderr, "warning: failed to parse %s: line %d in %s: %v\n", filePath, lineNum, filePath, err)
+			continue
 		}
 		if entry != nil {
 			entries = append(entries, entry)
@@ -203,10 +206,13 @@ func expandPath(path string) string {
 	return path
 }
 
-// getFilebase extracts filebase from file path (filename without .inv extension)
+// getFilebase extracts filebase from file path (filename without extension)
+// Handles both .json and .inv extensions for backward compatibility
 func getFilebase(filePath string) string {
 	base := filepath.Base(filePath)
-	return strings.TrimSuffix(base, ".inv")
+	base = strings.TrimSuffix(base, ".json")
+	base = strings.TrimSuffix(base, ".inv")
+	return base
 }
 
 // FormatEntry formats an entry as a v2 inventory line

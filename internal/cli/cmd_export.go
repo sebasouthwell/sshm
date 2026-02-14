@@ -52,7 +52,7 @@ func handleExport(outputFile string) error {
 	}
 
 	// Create tar.gz archive
-	// tar -czf output.tar.gz -C parent_dir inventory_dir_name/*.inv
+	// Include both .json (primary) and .inv (legacy) files
 	parentDir := filepath.Dir(invDir)
 	invDirName := filepath.Base(invDir)
 
@@ -61,6 +61,7 @@ func handleExport(outputFile string) error {
 		absOutput,
 		"-C",
 		parentDir,
+		invDirName + "/*.json",
 		invDirName + "/*.inv",
 	}
 

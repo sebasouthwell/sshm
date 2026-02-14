@@ -26,6 +26,8 @@ func NewManager(invDir, defaultBase string) *Manager {
 }
 
 // LoadAll loads all entries from all inventory files
+// Primary format: JSON (.json files)
+// Legacy format: Tab-separated (.inv files) - auto-migrated on first read
 func (m *Manager) LoadAll() ([]*Entry, error) {
 	var allEntries []*Entry
 
@@ -34,21 +36,74 @@ func (m *Manager) LoadAll() ([]*Entry, error) {
 		return nil, fmt.Errorf("failed to create inventory directory: %w", err)
 	}
 
-	// Find all .inv files
-	pattern := filepath.Join(m.invDir, "*.inv")
-	matches, err := filepath.Glob(pattern)
+	// Track which filebases we've loaded (to avoid duplicates)
+	loadedFilebases := make(map[string]bool)
+
+	// First, load all JSON files (primary format)
+	jsonPattern := filepath.Join(m.invDir, "*.json")
+	jsonMatches, err := filepath.Glob(jsonPattern)
 	if err != nil {
-		return nil, fmt.Errorf("failed to glob inventory files: %w", err)
+		return nil, fmt.Errorf("failed to glob JSON inventory files: %w", err)
 	}
 
-	// Load entries from each file
-	for _, filePath := range matches {
+	for _, filePath := range jsonMatches {
+		filebase := getFilebaseFromPath(filePath, ".json")
+		loadedFilebases[filebase] = true
+
+		entries, err := ParseJSONFile(filePath)
+		if err != nil {
+			// Log error but continue with other files
+			fmt.Fprintf(os.Stderr, "warning: failed to parse JSON file %s: %v\n", filePath, err)
+			continue
+		}
+		allEntries = append(allEntries, entries...)
+	}
+
+	// Then, load and migrate .inv files (legacy format, read-only)
+	invPattern := filepath.Join(m.invDir, "*.inv")
+	invMatches, err := filepath.Glob(invPattern)
+	if err != nil {
+		return nil, fmt.Errorf("failed to glob legacy inventory files: %w", err)
+	}
+
+	for _, filePath := range invMatches {
+		// Skip backup files
+		if strings.HasSuffix(filePath, ".bak") || strings.Contains(filePath, ".bak.") {
+			continue
+		}
+
+		filebase := getFilebaseFromPath(filePath, ".inv")
+		
+		// Skip if we already loaded this filebase from JSON
+		if loadedFilebases[filebase] {
+			// JSON file exists, skip legacy file (but warn if both exist)
+			fmt.Fprintf(os.Stderr, "warning: both .json and .inv files exist for '%s', using .json file\n", filebase)
+			continue
+		}
+
+		// Parse legacy file
 		entries, err := ParseFile(filePath)
 		if err != nil {
 			// Log error but continue with other files
-			fmt.Fprintf(os.Stderr, "warning: failed to parse %s: %v\n", filePath, err)
+			fmt.Fprintf(os.Stderr, "warning: failed to parse legacy file %s: %v\n", filePath, err)
 			continue
 		}
+
+		// Auto-migrate: convert to JSON format
+		jsonPath := filepath.Join(m.invDir, filebase+".json")
+		if err := WriteJSONFile(jsonPath, entries); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: failed to migrate %s to JSON: %v\n", filePath, err)
+			// Continue loading from legacy file
+		} else {
+			// Backup legacy file
+			backupPath := filePath + ".bak"
+			if err := os.Rename(filePath, backupPath); err != nil {
+				fmt.Fprintf(os.Stderr, "warning: failed to backup legacy file %s: %v\n", filePath, err)
+			} else {
+				fmt.Fprintf(os.Stderr, "info: migrated %s to %s (backed up to %s)\n", filePath, jsonPath, backupPath)
+			}
+		}
+
 		allEntries = append(allEntries, entries...)
 	}
 
@@ -73,6 +128,7 @@ func (m *Manager) Find(alias string) (*Entry, error) {
 
 // Add adds or updates an entry
 // If alias exists, removes it from all files first, then adds to specified filebase
+// Always writes to JSON format
 func (m *Manager) Add(entry *Entry, filebase string) error {
 	// Remove alias from all files if it exists
 	if err := m.Remove(entry.Alias); err != nil {
@@ -82,7 +138,7 @@ func (m *Manager) Add(entry *Entry, filebase string) error {
 		}
 	}
 
-	// Determine target file
+	// Determine target file (JSON format)
 	if filebase == "" {
 		filebase = m.defaultBase
 	}
@@ -93,22 +149,27 @@ func (m *Manager) Add(entry *Entry, filebase string) error {
 		return fmt.Errorf("failed to create inventory directory: %w", err)
 	}
 
+	// Load existing entries from JSON file (if exists)
+	var existingEntries []*Entry
+	if _, err := os.Stat(filePath); err == nil {
+		// File exists, load existing entries
+		if entries, err := ParseJSONFile(filePath); err == nil {
+			existingEntries = entries
+		}
+	}
+
+	// Append new entry
+	existingEntries = append(existingEntries, entry)
+
 	// Create backup before writing
 	if err := utils.BackupFile(filePath); err != nil {
 		// Log warning but continue
 		fmt.Fprintf(os.Stderr, "warning: failed to create backup: %v\n", err)
 	}
 
-	// Append entry to file
-	file, err := os.OpenFile(filePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		return fmt.Errorf("failed to open inventory file: %w", err)
-	}
-	defer file.Close()
-
-	line := FormatEntry(entry)
-	if _, err := fmt.Fprintln(file, line); err != nil {
-		return fmt.Errorf("failed to write entry: %w", err)
+	// Write all entries to JSON file
+	if err := WriteJSONFile(filePath, existingEntries); err != nil {
+		return fmt.Errorf("failed to write JSON file: %w", err)
 	}
 
 	// Invalidate cache
@@ -137,23 +198,68 @@ func (m *Manager) Remove(alias string) error {
 		return fmt.Errorf("alias not found: %s", alias)
 	}
 
-	// Remove from all files
-	pattern := filepath.Join(m.invDir, "*.inv")
-	matches, err := filepath.Glob(pattern)
+	// Remove from JSON files (primary format)
+	jsonPattern := filepath.Join(m.invDir, "*.json")
+	jsonMatches, err := filepath.Glob(jsonPattern)
 	if err != nil {
-		return fmt.Errorf("failed to glob inventory files: %w", err)
+		return fmt.Errorf("failed to glob JSON inventory files: %w", err)
 	}
 
-	for _, filePath := range matches {
-		if err := m.removeFromFile(filePath, alias); err != nil {
+	for _, filePath := range jsonMatches {
+		if err := m.removeFromJSONFile(filePath, alias); err != nil {
 			return fmt.Errorf("failed to remove from %s: %w", filePath, err)
+		}
+	}
+
+	// Also remove from legacy .inv files (if they still exist)
+	invPattern := filepath.Join(m.invDir, "*.inv")
+	invMatches, err := filepath.Glob(invPattern)
+	if err == nil {
+		for _, filePath := range invMatches {
+			// Skip backup files
+			if strings.HasSuffix(filePath, ".bak") || strings.Contains(filePath, ".bak.") {
+				continue
+			}
+			if err := m.removeFromFile(filePath, alias); err != nil {
+				// Log warning but continue (legacy file)
+				fmt.Fprintf(os.Stderr, "warning: failed to remove from legacy file %s: %v\n", filePath, err)
+			}
 		}
 	}
 
 	return nil
 }
 
-// removeFromFile removes an alias from a specific file
+// removeFromJSONFile removes an alias from a JSON file
+func (m *Manager) removeFromJSONFile(filePath, alias string) error {
+	entries, err := ParseJSONFile(filePath)
+	if err != nil {
+		return err
+	}
+
+	// Filter out the alias
+	var filtered []*Entry
+	for _, entry := range entries {
+		if entry.Alias != alias {
+			filtered = append(filtered, entry)
+		}
+	}
+
+	// Create backup before writing
+	if err := utils.BackupFile(filePath); err != nil {
+		// Log warning but continue
+		fmt.Fprintf(os.Stderr, "warning: failed to create backup: %v\n", err)
+	}
+
+	// Write filtered entries to JSON file
+	if err := WriteJSONFile(filePath, filtered); err != nil {
+		return fmt.Errorf("failed to write JSON file: %w", err)
+	}
+
+	return nil
+}
+
+// removeFromFile removes an alias from a legacy .inv file (read-only support)
 func (m *Manager) removeFromFile(filePath, alias string) error {
 	entries, err := ParseFile(filePath)
 	if err != nil {
@@ -174,7 +280,7 @@ func (m *Manager) removeFromFile(filePath, alias string) error {
 		fmt.Fprintf(os.Stderr, "warning: failed to create backup: %v\n", err)
 	}
 
-	// Build file content
+	// Build file content (legacy format)
 	var lines []string
 	for _, entry := range filtered {
 		lines = append(lines, FormatEntry(entry))
@@ -192,9 +298,15 @@ func (m *Manager) removeFromFile(filePath, alias string) error {
 	return nil
 }
 
-// getFilePath returns the full path for an inventory file
+// getFilePath returns the full path for an inventory file (JSON format)
 func (m *Manager) getFilePath(filebase string) string {
-	return filepath.Join(m.invDir, filebase+".inv")
+	return filepath.Join(m.invDir, filebase+".json")
+}
+
+// getFilebaseFromPath extracts filebase from file path
+func getFilebaseFromPath(filePath, ext string) string {
+	base := filepath.Base(filePath)
+	return strings.TrimSuffix(base, ext)
 }
 
 // GetInvDir returns the inventory directory path

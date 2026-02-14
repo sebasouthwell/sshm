@@ -185,6 +185,7 @@ func init() {
 	rootCmd.AddCommand(scpCmd)
 	rootCmd.AddCommand(exportCmd)
 	rootCmd.AddCommand(importCmd)
+	rootCmd.AddCommand(migrateCmd)
 	rootCmd.AddCommand(sshCmd)
 	rootCmd.AddCommand(tfWizardCmd) // Terraform wizard command (handles both wizard and provider convenience)
 	rootCmd.AddCommand(ssmCmd)

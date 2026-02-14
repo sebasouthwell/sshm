@@ -17,7 +17,7 @@ type Entry struct {
 	Tags     string            // Comma-separated tags (optional)
 	Meta     map[string]string // Provider-specific metadata
 	File     string            // Source inventory file path
-	Filebase string            // Inventory filebase (filename without .inv)
+	Filebase string            // Inventory filebase (filename without extension: .json or .inv)
 }
 
 // NewEntry creates a new Entry with initialized Meta map

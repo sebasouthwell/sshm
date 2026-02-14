@@ -101,6 +101,7 @@ sshm ls --json
 ### Inventory Management
 - `sshm export [file]` - Export inventory to archive
 - `sshm import <file>` - Import inventory from archive
+- `sshm migrate [--dry-run]` - Migrate legacy .inv files to JSON format
 
 ### Terraform Integration
 - `sshm tf` - Interactive terraform add wizard
@@ -120,16 +121,53 @@ sshm ls --json
 
 ## Inventory Format
 
-Entries are stored in `~/.ssh/inventory.d/*.inv` files (tab-separated):
+Entries are stored in `~/.ssh/inventory.d/*.json` files (JSON format):
 
-```
-alias<TAB>type<TAB>target<TAB>user<TAB>port<TAB>key<TAB>workdir<TAB>tags<TAB>meta
+```json
+[
+  {
+    "alias": "prod-web",
+    "type": "ssh",
+    "target": "host.example.com",
+    "user": "ubuntu",
+    "port": "22",
+    "key": "/home/user/.ssh/key.pem",
+    "workdir": "/home/user/work",
+    "tags": "prod,web",
+    "meta": {
+      "jump": "bastion",
+      "strict": "yes"
+    }
+  },
+  {
+    "alias": "tf-web",
+    "type": "tf",
+    "target": "module.web.instance:public",
+    "user": "ubuntu",
+    "port": "22",
+    "key": "/home/user/.ssh/key.pem",
+    "workdir": "/home/user/terraform",
+    "tags": "prod,terraform",
+    "meta": {}
+  }
+]
 ```
 
-**Example:**
-```
-prod-web	ssh	host.example.com	ubuntu	22	~/.ssh/key.pem	~/work	prod,web	jump=bastion;strict=yes
-```
+**Fields:**
+- `alias` (required): Unique identifier, regex `^[a-zA-Z0-9._-]+$`
+- `type` (required): Provider type (`ssh`, `tf`, `ssm`, `docker`, `kube`)
+- `target` (required): Provider-specific target string
+- `user` (optional): Default user
+- `port` (optional): Default port
+- `key` (optional): Key path (required for SSH/TF)
+- `workdir` (optional): Working directory
+- `tags` (optional): Comma-separated tags
+- `meta` (optional): Provider-specific metadata (key-value map)
+
+**Legacy Support:**
+- Old `.inv` files (tab-separated format) are automatically migrated to JSON on first load
+- Legacy files are backed up as `.inv.bak` after migration
+- Use `sshm migrate` to manually migrate all legacy files
 
 ## Providers
 
@@ -227,9 +265,11 @@ sshm open ssm-prod pf=5432:localhost:5432
 ## Configuration
 
 - Inventory directory: `~/.ssh/inventory.d` (override with `SSHM_INV_DIR`)
-- Default inventory file: `default.inv` (override with `SSHM_DEFAULT_FILEBASE`)
+- Default inventory file: `default.json` (override with `SSHM_DEFAULT_FILEBASE`)
 - History file: `~/.ssh/inventory.d/history.jsonl`
 - Cache directory: `$TMPDIR/sshm-*`
+
+**Note:** Legacy `.inv` files are automatically migrated to `.json` format on first load. Use `sshm migrate` to manually migrate all files.
 
 ## Requirements
 
