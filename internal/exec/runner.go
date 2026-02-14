@@ -28,8 +28,14 @@ func (r *Runner) Execute(plan *provider.ExecPlan) error {
 		}
 	}
 
+	// Find the command binary (use LookPath to find in PATH)
+	cmdPath := plan.Argv[0]
+	if foundPath, err := exec.LookPath(cmdPath); err == nil {
+		cmdPath = foundPath
+	}
+
 	// Create command
-	cmd := exec.Command(plan.Argv[0], plan.Argv[1:]...)
+	cmd := exec.Command(cmdPath, plan.Argv[1:]...)
 
 	// Set environment
 	cmd.Env = os.Environ()
@@ -47,12 +53,12 @@ func (r *Runner) Execute(plan *provider.ExecPlan) error {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
-	// Handle TTY
+	// Handle TTY - only set Setsid, avoid Setctty which can fail in WSL2
 	if plan.TTY {
-		// Set TTY modes
+		// Setsid creates a new session, but don't use Setctty in WSL2
+		// This allows SSH to work properly without permission errors
 		cmd.SysProcAttr = &syscall.SysProcAttr{
-			Setctty: true,
-			Setsid:  true,
+			Setsid: true,
 		}
 	}
 
