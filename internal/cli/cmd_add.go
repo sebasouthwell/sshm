@@ -72,7 +72,7 @@ func handleAddV1(alias string, args []string) error {
 	entry := inventory.NewEntry()
 	entry.Alias = alias
 	entry.Type = "ssh"
-	entry.Key = args[0]
+	entry.Key = resolvePath(args[0])
 	entry.Target = args[1]
 
 	if len(args) > 2 {
@@ -82,7 +82,7 @@ func handleAddV1(alias string, args []string) error {
 		entry.Port = args[3]
 	}
 	if len(args) > 4 {
-		entry.Workdir = args[4]
+		entry.Workdir = resolvePath(args[4])
 	}
 	if len(args) > 5 {
 		entry.Tags = args[5]
@@ -122,8 +122,8 @@ func handleAddV2(alias string, args []string) error {
 	entry.Target = addTarget
 	entry.User = addUser
 	entry.Port = addPort
-	entry.Key = addKey
-	entry.Workdir = addWorkdir
+	entry.Key = resolvePath(addKey)
+	entry.Workdir = resolvePath(addWorkdir)
 	entry.Tags = addTags
 
 	// For terraform entries, validate target format
@@ -161,6 +161,36 @@ func handleAddV2(alias string, args []string) error {
 		fmt.Printf("Added entry: %s (%s) -> %s\n", alias, addType, filePath)
 	}
 	return nil
+}
+
+// resolvePath resolves a path to absolute, respecting ~ and already-absolute paths
+// If path is relative, resolves based on current working directory
+// If path starts with ~, expands to home directory
+// If path is already absolute, returns as-is
+func resolvePath(path string) string {
+	if path == "" {
+		return ""
+	}
+
+	// Expand ~ to home directory
+	if strings.HasPrefix(path, "~/") {
+		if home, err := os.UserHomeDir(); err == nil {
+			path = filepath.Join(home, path[2:])
+		}
+	} else if path == "~" {
+		if home, err := os.UserHomeDir(); err == nil {
+			path = home
+		}
+	}
+
+	// Resolve to absolute path if relative (and not empty)
+	if !filepath.IsAbs(path) && path != "" {
+		if abs, err := filepath.Abs(path); err == nil {
+			path = abs
+		}
+	}
+
+	return path
 }
 
 func parseMetaString(metaStr string) (map[string]string, error) {
