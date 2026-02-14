@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"os"
 	osexec "os/exec"
 	"strings"
 	"time"
@@ -107,6 +108,8 @@ func handleOpen(alias string, remainingArgs []string) error {
 		if exitErr, ok := err.(*osexec.ExitError); ok {
 			logEvent.ExitCode = exitErr.ExitCode()
 		}
+		// Print error details for debugging
+		fmt.Fprintf(os.Stderr, "Error executing command: %v\n", err)
 	} else {
 		logEvent.ExitCode = 0
 	}

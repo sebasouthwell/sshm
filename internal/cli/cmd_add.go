@@ -93,7 +93,13 @@ func handleAddV1(alias string, args []string) error {
 		filebase = args[6]
 	}
 
-	return manager.Add(entry, filebase)
+	if err := manager.Add(entry, filebase); err != nil {
+		return err
+	}
+	
+	filePath := filepath.Join(manager.GetInvDir(), filebase+".json")
+	fmt.Printf("Added entry: %s (%s) -> %s\n", alias, entry.Type, filePath)
+	return nil
 }
 
 // handleAddV2 handles v2 format with flags
@@ -140,12 +146,20 @@ func handleAddV2(alias string, args []string) error {
 		filebase = defaultBase
 	}
 
+	// Check if entry already exists to show appropriate message
+	_, findErr := manager.Find(alias)
+	exists := findErr == nil
+	
 	if err := manager.Add(entry, filebase); err != nil {
 		return err
 	}
 
 	filePath := filepath.Join(manager.GetInvDir(), filebase+".json")
-	fmt.Printf("Added entry: %s (%s) -> %s\n", alias, addType, filePath)
+	if exists {
+		fmt.Printf("Updated entry: %s (%s) -> %s\n", alias, addType, filePath)
+	} else {
+		fmt.Printf("Added entry: %s (%s) -> %s\n", alias, addType, filePath)
+	}
 	return nil
 }
 
